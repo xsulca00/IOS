@@ -53,8 +53,8 @@ sem_t* create_sem(unsigned);
 struct Number get_num_or_err(char* str);
 void free_all_resources(void);
 
-// print error with prefix e.g. "Adults count: ..."
-void error(int, ...);
+// print error with prefix e.g. "Adults count: ...", NULL serves as end of strings
+void error_and_die(int, ...);
 
 /* sdilena pamet mezi procesy*/
 int *pas_id;		// generuje interni identifikator pro proces pasazera v rozsahu <1, P>
@@ -97,7 +97,7 @@ int main(int argc, char **argv)
 {   
   if (argc != 6)
   {
-     error(BAD_INPUT, "Usage:", argv[0], "A C AGT CGT AWT CWT", NULL);
+     error_and_die(BAD_INPUT, "Usage:", argv[0], "A C AGT CGT AWT CWT", NULL);
   } 
   
   get_params(argv);
@@ -107,7 +107,7 @@ int main(int argc, char **argv)
   
   if (file == NULL)
   {
-      error(SYS_CALL_FAIL, "fopen:", NULL);
+      error_and_die(SYS_CALL_FAIL, "fopen:", NULL);
   }
 
   pid_t car = -1;		// id procesu voziku v ramci systemu
@@ -135,7 +135,7 @@ int main(int argc, char **argv)
   // pokud se nepodarilo vytvorit proces vykonej patricne kroky
   errno = 0;
   if ((help_process_pid = fork()) < 0) {
-     error(SYS_CALL_FAIL, "fork help_process_id:", NULL);
+     error_and_die(SYS_CALL_FAIL, "fork help_process_id:", NULL);
   } else if (help_process_pid == 0) {
     for (int i = 1; i <= passenger_count; i++) {
         if (generate_next_passanger > 0)
@@ -143,7 +143,7 @@ int main(int argc, char **argv)
         // pokud se nepodarilo vytvorit proces vykonej patricne kroky
         errno = 0;
         if ((passenger = fork()) < 0) {
-             error(SYS_CALL_FAIL, "fork passenger:", NULL);
+             error_and_die(SYS_CALL_FAIL, "fork passenger:", NULL);
         } else if (passenger == 0) {
           break;
         }
@@ -235,7 +235,7 @@ int main(int argc, char **argv)
   // pokud se nepodarilo vytvorit proces vykonej patricne kroky
   errno = 0;
   if ((car = fork()) < 0) {
-     error(SYS_CALL_FAIL, "fork car:", NULL);
+     error_and_die(SYS_CALL_FAIL, "fork car:", NULL);
   } else if (car == 0) {
     
     (*car_id)++; // unikatni cislo voziku
@@ -345,12 +345,11 @@ void destroy_semaphores(void)
     sem_destroy(wait_till_finish) == -1 ||
     sem_destroy(unload) == -1
   ) {
-    perror("destroy_semaphores");
-    _exit(SYS_CALL_FAIL);
+        error_and_die(SYS_CALL_FAIL, __func__, "sem_destroy: ", NULL);
   }
 }
 
-void error(int severity, ...)
+void error_and_die(int severity, ...)
 {
     va_list ap;
     va_start(ap, severity);
@@ -379,8 +378,7 @@ void* alloc_shared_mem(size_t sz)
 
     if (mem == (void*)-1)
     {
-        perror("mmap");
-        _exit(SYS_CALL_FAIL);
+        error_and_die(SYS_CALL_FAIL, __func__, "mmap: ", NULL);
     }
 
     return mem;
@@ -393,8 +391,7 @@ sem_t* create_sem(unsigned value)
     errno = 0;
     if (sem_init(sem, 1, value) == -1)
     {
-        perror("sem_init");
-        _exit(SYS_CALL_FAIL);
+        error_and_die(SYS_CALL_FAIL, __func__, "sem_init: ", NULL);
     }
 
     return sem;
@@ -446,12 +443,12 @@ void get_params(char **argv)
 
         if (n.err.what)
         {
-            error(BAD_INPUT, "Adults count:", n.err.what, NULL);
+            error_and_die(BAD_INPUT, "Adults count:", n.err.what, NULL);
         } 
 
         if (n.num < 0) 
         {
-            error(BAD_INPUT, "Adults count:", "Count must be greater than 0!", NULL);
+            error_and_die(BAD_INPUT, "Adults count:", "Count must be greater than 0!", NULL);
         }
 
         opts.adults_count = n.num;
@@ -463,12 +460,12 @@ void get_params(char **argv)
 
         if (n.err.what)
         {
-            error(BAD_INPUT, "Childern count:", n.err.what, NULL);
+            error_and_die(BAD_INPUT, "Childern count:", n.err.what, NULL);
         } 
 
         if (n.num < 0)
         {
-            error(BAD_INPUT, "Childern count:", "Count must be greater than 0!", NULL);
+            error_and_die(BAD_INPUT, "Childern count:", "Count must be greater than 0!", NULL);
         }
 
         opts.childern_count = n.num;
@@ -480,12 +477,12 @@ void get_params(char **argv)
 
         if (n.err.what)
         {
-            error(BAD_INPUT, "Adult generate time:", n.err.what, NULL);
+            error_and_die(BAD_INPUT, "Adult generate time:", n.err.what, NULL);
         } 
 
         if (!(n.num >= 0 && n.num < 5001))
         {
-            error(BAD_INPUT, "Adult generate time:", "Time is out of range!", NULL);
+            error_and_die(BAD_INPUT, "Adult generate time:", "Time is out of range!", NULL);
         }
 
         opts.next_adult = n.num;
@@ -497,12 +494,12 @@ void get_params(char **argv)
 
         if (n.err.what)
         {
-            error(BAD_INPUT, "Child generate time:", n.err.what, NULL);
+            error_and_die(BAD_INPUT, "Child generate time:", n.err.what, NULL);
         } 
 
         if (!(n.num >= 0 && n.num < 5001))
         {
-            error(BAD_INPUT, "Child generate time:", "Time is out of range!", NULL);
+            error_and_die(BAD_INPUT, "Child generate time:", "Time is out of range!", NULL);
         }
 
         opts.next_child = n.num;
@@ -514,12 +511,12 @@ void get_params(char **argv)
 
         if (n.err.what)
         {
-            error(BAD_INPUT, "Adult work time:", n.err.what, NULL);
+            error_and_die(BAD_INPUT, "Adult work time:", n.err.what, NULL);
         } 
 
         if (!(n.num >= 0 && n.num < 5001))
         {
-            error(BAD_INPUT, "Adult work time:", "Time is out of range!", NULL);
+            error_and_die(BAD_INPUT, "Adult work time:", "Time is out of range!", NULL);
         }
 
         opts.adult_works = n.num;
@@ -531,12 +528,12 @@ void get_params(char **argv)
 
         if (n.err.what)
         {
-            error(BAD_INPUT, "Child work time:", n.err.what, NULL);
+            error_and_die(BAD_INPUT, "Child work time:", n.err.what, NULL);
         } 
 
         if (!(n.num >= 0 && n.num < 5001))
         {
-            error(BAD_INPUT, "Child work time:", "Time is out of range!", NULL);
+            error_and_die(BAD_INPUT, "Child work time:", "Time is out of range!", NULL);
         }
 
         opts.child_works = n.num;
