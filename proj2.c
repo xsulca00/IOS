@@ -12,7 +12,6 @@
 #include <semaphore.h>
 #include <errno.h>
 
-/* konstanty pro rozliseni tisku udalosti */
 enum events {
   ADULT_STARTED = 0,
   ADULT_ENTER,
@@ -28,13 +27,14 @@ enum events {
   CHILD_FINISHED,
 };
 
-/* Error values */
+// return values
 enum {
     NO_ERROR =  0,
     BAD_INPUT = 1, 
     SYS_CALL_FAIL = 2
 };
 
+// holds number and/or error 
 struct Number {
     /* number */
     long num;
@@ -44,45 +44,44 @@ struct Number {
     } err;
 };
 
-/* prototypy funkci */
-void print_event(enum events event, int);	// tiskne udalosti do souboru proj2.out dle zadani
-void get_params(char **argv);		// kontrola vstupnich parametru z terminalu
-void* alloc_shared_mem(size_t);
-sem_t* create_sem(unsigned);        // create semaphore with initial value
+// function prototypes
+void print_event(enum events event, int); // print out events	
+void get_params(char **argv);	    // get program parameters & validate	
+void* alloc_shared_mem(size_t)      ;
+sem_t* create_shared_sem(unsigned);        // create semaphore with initial value
 void destroy_sem(sem_t*);
-struct Number get_num_or_err(char* str);
+struct Number get_num_or_err(char* str); //get number
 void dealloc_shared_mem(void*, size_t);
 void free_all_resources(void);
-void create_adult_generator(void);
-void create_child_generator(void);
+void create_adult_generator(void);  // create adult process generator
+void create_child_generator(void);  // create child process generator
 
 // print error with prefix e.g. "Adults count: ...", NULL serves as end of strings
+// print system error according to errno also
 void error_and_die(int, ...);
 
-/* sdilena pamet mezi procesy*/
+// shared variables amongst the processes
+int* event_id;			// event counter printed out to file
+int* adult_id;		    // ID of the adult process
+int* child_id;		    // ID of the child process
+int* adults_count;      // number of entered adults
+int* childern_count;    // number of entered childern
+bool* last_adult_left;  // no adults at all?
+int* child_wait_count;  // number of waiting adults
+int* adults_wait_count; // number of waiting adults
 
-int* event_id;			// pocitadlo akci
-int* adult_id;		    // celociselny identifikator pro procesy adult
-int* child_id;		    // celociselny identifikator pro procesy child
-int* adults_count;      // poc
-int* childern_count;    // pocet deti pritomnych v centru
-bool* last_adult_left;
+// shared semaphores amongst the processes
+sem_t *mutex;	    	// mutex for priting into file
+sem_t *mutex1;		    // mutex for adult process
+sem_t *mutex2;		    // mutex for childern process
+sem_t* adults_wait;     // adults waiting till childern leave 
+sem_t* child_group;     // childern waiting till adult enter 
+sem_t* wait_till_finish;// processes waiting till finish
 
-/* sdilene semafory mezi procesy */
-sem_t *mutex;		// mutex do kriticke oblasti pri zapisu do souboru
-sem_t *mutex1;		// mutex do kriticke oblasti pri zapisu do souboru
-sem_t *mutex2;		// mutex do kriticke oblasti v procesu pasazera
-sem_t *wait_adults_till_finish;     // adult procesy cekaji na ukonceni
-sem_t *wait_childern_till_finish;   // child procesy cekaji na ukonceni
-sem_t* adults_wait;
-sem_t* childern_wait;
-sem_t* child_group;
-
-/* ukazatel na otevreny soubor */
+// output file pointer
 FILE *file;      
 
-/* promenne pro uchovani hodnot z parametru spusteneho programu */
-
+// stores input parameters
 struct options {
     long adults_count;		
     long childern_count;
@@ -107,30 +106,34 @@ int main(int argc, char **argv)
         error_and_die(SYS_CALL_FAIL, "fopen:", NULL);
     }
 
-    /* alokace sdilene pameti mezi procesy pro semafory */
-    mutex = create_sem(1);
-    mutex1 = create_sem(1);
-    mutex2 = create_sem(1);
-    wait_childern_till_finish = create_sem(0);
-    wait_adults_till_finish = create_sem(0);
-    adults_wait = create_sem(0);
-    childern_wait = create_sem(0);
+    // shared semaphores creation
+    mutex = create_shared_sem(1);
+    mutex1 = create_shared_sem(1);
+    mutex2 = create_shared_sem(1);
+    adults_wait = create_shared_sem(0);
+    wait_till_finish = create_shared_sem(0);
 
-    /* alokace sdilene pameti pro sdilene promenne */
+    // allocate memory for shared variables
     event_id = alloc_shared_mem(sizeof(int));
     adult_id = alloc_shared_mem(sizeof(int));
     child_id = alloc_shared_mem(sizeof(int));
     adults_count = alloc_shared_mem(sizeof(int));
+    child_wait_count = alloc_shared_mem(sizeof(int));
+    adults_wait_count = alloc_shared_mem(sizeof(int));
+
     childern_count = alloc_shared_mem(sizeof(int));
+
+    // create array of mutexes for childern groups
     {
         child_group = alloc_shared_mem(sizeof(sem_t)*opts.adults_count+1);
 
         for (int i = 0; i != opts.adults_count; i++)
             sem_init(&child_group[i], 1, 0);
     }
+
     last_adult_left = alloc_shared_mem(sizeof(bool));
 
-    // index od adult and child begins from one
+    // index of adult and child
     *adult_id = 0;
     *child_id = 0;
 
@@ -146,7 +149,6 @@ int main(int argc, char **argv)
     for (int i = 0; i != 2; i++)
     {
         wait(NULL);
-        printf("GEN %i finished!\n", i);
     }
 
     exit(NO_ERROR);
@@ -161,7 +163,6 @@ void print_event(enum events event, int id)
     case ADULT_STARTED: fprintf(file, "%i: A %i: started\n", *event_id, id); break;
     case ADULT_ENTER: fprintf(file, "%i: A %i: enter\n", *event_id, id); break;
     case ADULT_TRY_LEAVE: fprintf(file, "%i: A %i: trying to leave\n", *event_id, id); break;
-    // TODO: dodelat waiting
     case ADULT_WAIT: fprintf(file, "%i: A %i: waiting: %i: %i\n", *event_id, id, *adults_count, *childern_count); break;
     case ADULT_LEAVE: fprintf(file, "%i: A %i: leave\n", *event_id, id); break;
     case ADULT_FINISHED: fprintf(file, "%i: A %i: finished\n", *event_id, id); break;
@@ -169,7 +170,6 @@ void print_event(enum events event, int id)
     case CHILD_STARTED: fprintf(file, "%i: C %i: started\n", *event_id, id); break;
     case CHILD_ENTER: fprintf(file, "%i: C %i: enter\n", *event_id, id); break;
     case CHILD_TRY_LEAVE: fprintf(file, "%i: C %i: trying to leave\n", *event_id, id); break;
-    // TODO: dodelat waiting
     case CHILD_WAIT: fprintf(file, "%i: C %i: waiting: %i: %i\n", *event_id, id, *adults_count, *childern_count); break;
     case CHILD_LEAVE: fprintf(file, "%i: C %i: leave\n", *event_id, id); break;
     case CHILD_FINISHED: fprintf(file, "%i: C %i: finished\n", *event_id, id); break;
@@ -239,7 +239,7 @@ void* alloc_shared_mem(size_t sz)
     return mem;
 }
 
-sem_t* create_sem(unsigned value)
+sem_t* create_shared_sem(unsigned value)
 {
     sem_t* sem = alloc_shared_mem(sizeof(*sem));
 
@@ -260,14 +260,10 @@ void free_all_resources(void)
         destroy_sem(mutex1);
     if (mutex2)
         destroy_sem(mutex2);
-    if (wait_adults_till_finish)
-        destroy_sem(wait_adults_till_finish);
-    if (wait_childern_till_finish)
-        destroy_sem(wait_childern_till_finish);
     if (adults_wait)
         destroy_sem(adults_wait);
-    if (childern_wait)
-        destroy_sem(childern_wait);
+    if (wait_till_finish)
+        destroy_sem(wait_till_finish);
 
     if (event_id)
         dealloc_shared_mem(event_id, sizeof(*event_id));
@@ -275,6 +271,11 @@ void free_all_resources(void)
         dealloc_shared_mem(adult_id, sizeof(*adult_id));
     if (child_id)
         dealloc_shared_mem(child_id, sizeof(*child_id));
+    if (child_wait_count)
+        dealloc_shared_mem(child_wait_count, sizeof(*child_wait_count));
+    if (adults_wait_count)
+        dealloc_shared_mem(adults_wait_count, sizeof(*adults_wait_count));
+
     if (child_group)
     {
         child_group = alloc_shared_mem(sizeof(sem_t)*opts.adults_count);
@@ -305,6 +306,7 @@ void create_adult_generator()
         // generate adult processes
         for (int i = 0; i != opts.adults_count; i++)
         {
+            // next adult process after some optional break
             if (opts.next_adult > 0)
                 usleep(rand() % (opts.next_adult + 1));   
 
@@ -316,58 +318,81 @@ void create_adult_generator()
             // adult process
             else if (adult == 0) 
             {
-                // get pid
                 sem_wait(mutex1);
-                int aid = ++*adult_id;
+                    // adult ID for print
+                    int aid = ++*adult_id;
+                    // adult process started
+                    print_event(ADULT_STARTED, aid);
                 sem_post(mutex1);
 
-                // adult process started
-                print_event(ADULT_STARTED, aid);
-                usleep(200);
-
                 sem_wait(mutex1);
-                (*adults_count)++;
-                print_event(ADULT_ENTER, aid);
+                    (*adults_count)++;
+                    print_event(ADULT_ENTER, aid);
+                    {
+                        // release waiting childern
+                        for (int i = 1; i <= *child_wait_count; i++)
+                            sem_post(&child_group[*childern_count/3]);
+                    }
                 sem_post(mutex1);
-                usleep(200);
-
-                sem_post(&child_group[aid]);
 
                 // adult works
                 if (opts.adult_works > 0)
                     usleep(rand() % (opts.adult_works + 1));   
 
-                print_event(ADULT_TRY_LEAVE, aid);
-                usleep(200);
-
                 sem_wait(mutex1);
-                /*
-                sem_wait(mutex);
-                fprintf(file, "A %i: %i > (%i-1)*3\n", aid, *childern_count, *adults_count);
-                sem_post(mutex);
-                */
+                print_event(ADULT_TRY_LEAVE, aid);
                 if (*childern_count > (*adults_count-1)*3)
                 {
                     // waiting
                     print_event(ADULT_WAIT, aid);
                     sem_post(mutex1);
 
+                    (*adults_wait_count)++;
                     sem_wait(adults_wait);
+
+                    sem_wait(mutex1);
+                    (*adults_wait_count)--;
+                    (*adults_count)--;
+                    // check whether is this adult last one of all
+                    if (*adults_count == 0 && *adult_id == opts.adults_count)
+                    {
+                        *last_adult_left = true;
+
+                        for (int i = 1; i <= *child_wait_count; i++)
+                            sem_post(&child_group[*childern_count/3]);
+
+                    }
+                    print_event(ADULT_LEAVE, aid);
+                    sem_post(mutex1);
                 }
                 else
                 {
+                    // continue and leave
                     (*adults_count)--;
                     print_event(ADULT_LEAVE, aid);
+                    // check whether is this adult last one of all
+                    if (*adults_count == 0 && *adult_id == opts.adults_count)
+                    {
+                        *last_adult_left = true;
+
+                        for (int i = 1; i <= *child_wait_count; i++)
+                            sem_post(&child_group[*childern_count/3]);
+                    }
                     sem_post(mutex1);
-                    usleep(200);
                 }
 
-                /*
-                if (aid >= opts.adults_count)
-                    sem_post(wait_adults_till_finish);
+                // all processed ended, should it be released?
+                if (*last_adult_left &&
+                    *childern_count == 0 &&
+                    *child_id == opts.childern_count
+                    )
+                {
+                    sem_post(wait_till_finish);
+                }
                 else
-                    sem_wait(wait_adults_till_finish);
-                    */
+                    sem_wait(wait_till_finish);
+
+                sem_post(wait_till_finish);
 
                 print_event(ADULT_FINISHED, aid);
                 exit(NO_ERROR);
@@ -379,10 +404,7 @@ void create_adult_generator()
         {
             for (int i = 0; i != opts.adults_count; i++)
             {
-                if (i == opts.adults_count)
-                    *last_adult_left = true;
                 wait(NULL);
-                printf("ADULT: %i finished!\n", i);
             }
             exit(NO_ERROR);
         }
@@ -405,6 +427,7 @@ void create_child_generator()
         // generate childern processes
         for (int i = 0; i != opts.childern_count; i++)
         {
+            // generate after some optional break
             if (opts.next_child > 0)
                 usleep(rand() % (opts.next_child + 1)); 
 
@@ -417,37 +440,35 @@ void create_child_generator()
             else if (child == 0) 
             {
                 sem_wait(mutex2);
-                int cid = ++*child_id;
-                // child process started
-                print_event(CHILD_STARTED, cid);
+                    // child ID for print
+                    int cid = ++*child_id;
+                    print_event(CHILD_STARTED, cid);
                 sem_post(mutex2);
 
-                usleep(200);
-
                 // trying to enter
-                usleep(200);
                 sem_wait(mutex2);
-                /*
-                    sem_wait(mutex);
-                    fprintf(file, "C %i: (%i+1) > %i*3\n", cid, *childern_count, *adults_count);
-                    sem_post(mutex);
-                    */
-                usleep(200);
-                if ((*childern_count+1) > *adults_count*3 && !last_adult_left)
+                if (!*last_adult_left && ((*childern_count+1) > *adults_count*3))
                 {
                     // waiting
+                    (*child_wait_count)++;
                     print_event(CHILD_WAIT, cid);
-                    printf("WAIT C: %i\n", *childern_count);
                     sem_post(mutex2);
 
-                    sem_wait(&child_group[*childern_count/4]);
+                    sem_wait(&child_group[*childern_count/3]);
+
+                    sem_wait(mutex2);
+                    (*childern_count)++;
+                    (*child_wait_count)--;
+                    print_event(CHILD_ENTER, cid);
+                    sem_post(mutex2);
                 }
                 else
                 {
+                    // enter
+                    (*child_wait_count)--;
                     (*childern_count)++;
                     print_event(CHILD_ENTER, cid);
                     sem_post(mutex2);
-                    usleep(200);
                 }
 
                 // child works
@@ -455,25 +476,30 @@ void create_child_generator()
                     usleep(rand() % (opts.child_works + 1));   
 
                 print_event(CHILD_TRY_LEAVE, cid);
-                usleep(200);
-
 
                 sem_wait(mutex2);
+                // release adults if enough childern left
                 (*childern_count)--;
                 if (*childern_count / 3 || *childern_count == 0)
                 {
-                    printf("C: %i\n", *childern_count);
-                    sem_post(adults_wait);
+                    for (int i = 1; i <= *adults_wait_count; i++)
+                        sem_post(adults_wait);
                 }
                 print_event(CHILD_LEAVE, cid);
                 sem_post(mutex2);
 
-                /*
-                if (cid >= opts.childern_count)
-                    sem_post(wait_childern_till_finish);
+                // all processed ended, should it be released?
+                if (*last_adult_left &&
+                    *childern_count == 0 && 
+                    *child_id == opts.childern_count
+                   )
+                {
+                    sem_post(wait_till_finish);
+                }
                 else
-                    sem_wait(wait_childern_till_finish);
-                    */
+                    sem_wait(wait_till_finish);
+
+                sem_post(wait_till_finish);
 
                 print_event(CHILD_FINISHED, cid);
                 exit(NO_ERROR);
@@ -486,7 +512,6 @@ void create_child_generator()
             for (int i = 0; i != opts.childern_count; i++)
             {
                 wait(NULL);
-                printf("CHILD: %i finished!\n", i);
             }
             exit(NO_ERROR);
         }
